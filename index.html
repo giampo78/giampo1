@@ -1,112 +1,204 @@
 <!DOCTYPE html>
 <html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ContaDaimoku Settore Torraccia</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; }
-        h2 { margin-bottom: 10px; }
-        table { border-collapse: collapse; margin: 20px auto; width: 90%; }
-        td, th { border: 1px solid black; padding: 10px; text-align: center; cursor: pointer; }
-        .square { width: 10px; height: 10px; display: inline-block; background-color: white; border: 1px solid black; margin: 1px; }
-        .occupied { background-color: black; }
-        .edit-name { border: none; font-size: 16px; text-align: center; width: 120px; }
-        #counter { font-size: 20px; margin-top: 20px; }
+      body { font-family: Arial, sans-serif; text-align: center; }
+      h2 { margin-bottom: 10px; }
+      table { border-collapse: collapse; margin: 20px auto; width: 90%; }
+      td, th { border: 1px solid black; padding: 10px; text-align: center; cursor: pointer; }
+      .square { width: 10px; height: 10px; display: inline-block; background-color: white; border: 1px solid black; margin: 1px; }
+      .occupied { background-color: black; }
+      .edit-name { border: none; font-size: 16px; text-align: center; width: 120px; }
+      #counter { font-size: 20px; margin-top: 20px; }
+      #undoButton { margin-top: 10px; padding: 5px 10px; font-size: 16px; }
     </style>
-</head>
-<body>
-
+  </head>
+  <body>
     <h2>ContaDaimoku Settore Torraccia</h2>
-
+    
+    <!-- Pulsante per annullare l'ultima modifica -->
+    <button id="undoButton">Annulla ultima modifica</button>
+    
     <div id="counter">Ore totali: 0 | Daimoku totali: 0</div>
-
+    
     <table id="schedule">
-        <thead>
-            <tr>
-                <th>Nome</th>
-                <th>Ore</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Ore</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
     </table>
-
+    
+    <!-- Includiamo Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
     <script>
-        const names = [
+      /***** CONFIGURAZIONE FIREBASE *****/
+      // Sostituisci questi valori con quelli del tuo progetto Firebase di test
+      const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+        projectId: "YOUR_PROJECT",
+        storageBucket: "YOUR_PROJECT.appspot.com",
+        messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+        appId: "YOUR_APP_ID"
+      };
+      
+      // Inizializza Firebase
+      firebase.initializeApp(firebaseConfig);
+      const db = firebase.database();
+      
+      /***** VARIABILI E COSTANTI *****/
+      const hoursPerRow = 200;
+      const tableBody = document.querySelector("tbody");
+      const counter = document.getElementById("counter");
+      
+      // Variabile globale per registrare l'ultima modifica (per il tasto Undo)
+      let lastModification = null;
+      
+      /***** FUNZIONE PER AGGIORNARE IL CONTATORE GLOBALE *****/
+      function updateCounter(data) {
+        let totalOccupied = 0;
+        data && Object.values(data).forEach(userData => {
+          userData.squares.forEach(row => {
+            row.forEach(val => {
+              if(val === 1) totalOccupied++;
+            });
+          });
+        });
+        let totalDaimoku = totalOccupied * 3000;
+        counter.innerHTML = `Ore totali: ${totalOccupied} | Daimoku totali: ${totalDaimoku}`;
+      }
+      
+      /***** FUNZIONE PER CREARE UNA RIGA (USER) *****/
+      // 'key' è la chiave del record in Firebase, utile per aggiornare il dato
+      function createRow(key, name, squares) {
+        const row = document.createElement("tr");
+        row.setAttribute("data-key", key);
+      
+        // Cella Nome editabile
+        const nameCell = document.createElement("td");
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = name;
+        nameInput.className = "edit-name";
+        nameInput.addEventListener("input", () => {
+          db.ref("daimokuData/" + key).update({ name: nameInput.value });
+        });
+        nameCell.appendChild(nameInput);
+        row.appendChild(nameCell);
+      
+        // Cella Ore (quadratini)
+        const hoursCell = document.createElement("td");
+        squares.forEach((state, rowIndex) => {
+          const rowDiv = document.createElement("div");
+          rowDiv.className = "square-row";
+          // Se la riga contiene array di numeri, iteriamo su ciascun quadratino
+          state.forEach((val, colIndex) => {
+            const square = document.createElement("div");
+            square.className = "square";
+            if (val) square.classList.add("occupied");
+            square.addEventListener("click", function() {
+              // Registra l'ultima modifica: salviamo la chiave, riga, colonna e stato precedente
+              lastModification = { key, rowIndex, colIndex, previous: state[colIndex] };
+      
+              // Alterna lo stato del quadratino
+              const newState = square.classList.contains("occupied") ? 0 : 1;
+              square.classList.toggle("occupied");
+              squares[rowIndex][colIndex] = newState;
+      
+              // Se siamo nell'ultima riga e tutti i quadratini sono occupati, aggiungi una nuova riga
+              if (
+                rowIndex === squares.length - 1 &&
+                squares[rowIndex].every(v => v === 1)
+              ) {
+                let newRow = new Array(hoursPerRow).fill(0);
+                squares.push(newRow);
+                const newRowDiv = document.createElement("div");
+                newRowDiv.className = "square-row";
+                newRow.forEach((v, newColIndex) => {
+                  const newSquare = document.createElement("div");
+                  newSquare.className = "square";
+                  newSquare.addEventListener("click", () => {
+                    lastModification = {
+                      key,
+                      rowIndex: squares.length - 1,
+                      colIndex: newColIndex,
+                      previous: newRow[newColIndex]
+                    };
+                    const newState2 = newSquare.classList.contains("occupied") ? 0 : 1;
+                    newSquare.classList.toggle("occupied");
+                    newRow[newColIndex] = newState2;
+                    db.ref("daimokuData/" + key).update({ squares: squares });
+                  });
+                  newRowDiv.appendChild(newSquare);
+                });
+                hoursCell.appendChild(newRowDiv);
+              }
+      
+              // Aggiorna i dati in Firebase
+              db.ref("daimokuData/" + key).update({ squares: squares });
+            });
+            rowDiv.appendChild(square);
+          });
+          hoursCell.appendChild(rowDiv);
+        });
+        row.appendChild(hoursCell);
+        tableBody.appendChild(row);
+      }
+      
+      /***** CARICAMENTO DEI DATI DA FIREBASE *****/
+      // Ascolta le modifiche in tempo reale al nodo "daimokuData"
+      db.ref("daimokuData").on("value", snapshot => {
+        const data = snapshot.val();
+        tableBody.innerHTML = "";
+        if (data) {
+          Object.keys(data).forEach(key => {
+            const userData = data[key];
+            createRow(key, userData.name, userData.squares);
+          });
+        }
+        updateCounter(data);
+      });
+      
+      /***** SEEDING DEI DATI (SE NESSUN DATO ESISTE) *****/
+      db.ref("daimokuData").once("value").then(snapshot => {
+        if (!snapshot.exists()) {
+          const names = [
             "Giampaolo", "Sabrina", "Giancarlo", "Silvana", "Alessia", "Francesca", "Annamaria", "Pino", "", 
             "Antonio", "", "Claudia", "Giovanna", "", "", "", "", "", "", ""
-        ];
-        const hoursPerRow = 200;
-        const tableBody = document.querySelector("tbody");
-        const counter = document.getElementById("counter");
-
-        function updateCounter() {
-            let totalHours = document.querySelectorAll(".occupied").length;
-            let totalDaimoku = totalHours * 3000;
-            counter.innerHTML = `Ore totali: ${totalHours} | Daimoku totali: ${totalDaimoku}`;
-            localStorage.setItem("counter", JSON.stringify({ hours: totalHours, daimoku: totalDaimoku }));
+          ];
+          names.forEach(name => {
+            // Crea una riga con 'hoursPerRow' quadratini (tutti a 0)
+            const squares = Array(hoursPerRow).fill(0);
+            db.ref("daimokuData").push({ name: name, squares: [squares] });
+          });
         }
-
-        function saveData() {
-            let data = [];
-            document.querySelectorAll("tr").forEach((row, index) => {
-                if (index === 0) return; // Skip header
-                let name = row.querySelector(".edit-name").value;
-                let squares = Array.from(row.querySelectorAll(".square")).map(sq => sq.classList.contains("occupied") ? 1 : 0);
-                data.push({ name, squares });
-            });
-            localStorage.setItem("daimokuData", JSON.stringify(data));
-        }
-
-        function loadData() {
-            let savedData = JSON.parse(localStorage.getItem("daimokuData"));
-            let savedCounter = JSON.parse(localStorage.getItem("counter"));
-
-            if (savedCounter) {
-                counter.innerHTML = `Ore totali: ${savedCounter.hours} | Daimoku totali: ${savedCounter.daimoku}`;
+      });
+      
+      /***** GESTIONE DEL PULSANTE "UNDO" *****/
+      document.getElementById("undoButton").addEventListener("click", () => {
+        if (lastModification) {
+          const { key, rowIndex, colIndex, previous } = lastModification;
+          // Leggi i dati correnti per quell'utente
+          db.ref("daimokuData/" + key).once("value").then(snapshot => {
+            let userData = snapshot.val();
+            if (userData && userData.squares && userData.squares[rowIndex]) {
+              userData.squares[rowIndex][colIndex] = previous;
+              db.ref("daimokuData/" + key).update({ squares: userData.squares });
+              lastModification = null;
             }
-
-            if (savedData) {
-                savedData.forEach((entry, rowIndex) => {
-                    createRow(entry.name, entry.squares);
-                });
-            } else {
-                names.forEach(name => createRow(name, Array(hoursPerRow).fill(0)));
-            }
+          });
+        } else {
+          alert("Nessuna modifica da annullare.");
         }
-
-        function createRow(name, squares) {
-            const row = document.createElement("tr");
-
-            // Cella Nome editabile
-            const nameCell = document.createElement("td");
-            const nameInput = document.createElement("input");
-            nameInput.type = "text";
-            nameInput.value = name;
-            nameInput.className = "edit-name";
-            nameInput.addEventListener("input", saveData);
-            nameCell.appendChild(nameInput);
-            row.appendChild(nameCell);
-
-            // Cella ore con quadratini
-            const hoursCell = document.createElement("td");
-            squares.forEach(state => {
-                const square = document.createElement("div");
-                square.className = "square";
-                if (state) square.classList.add("occupied");
-                square.addEventListener("click", function() {
-                    this.classList.toggle("occupied");
-                    updateCounter();
-                    saveData();
-                });
-                hoursCell.appendChild(square);
-            });
-            row.appendChild(hoursCell);
-            tableBody.appendChild(row);
-        }
-
-        loadData();
+      });
     </script>
-
-</body>
+  </body>
 </html>
